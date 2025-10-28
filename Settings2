@@ -1,0 +1,55 @@
+from airflow.models import DAG
+
+def dag_policy(dag: DAG):
+    """DAG 폴더 기반으로 access_control 자동 설정"""
+    
+    if not dag.fileloc:
+        return
+    
+    path_parts = dag.fileloc.split('/')
+    
+    if 'dags' not in path_parts:
+        return
+    
+    dags_index = path_parts.index('dags')
+    
+    if len(path_parts) <= dags_index + 1:
+        return
+    
+    team_folder = path_parts[dags_index + 1]
+    
+    if team_folder.endswith('.py'):
+        return
+    
+    if dag.access_control is None:
+        dag.access_control = {}
+    
+    # shared 폴더인 경우: 모든 -user 역할에게 읽기 권한 부여
+    if team_folder == 'shared':
+        # 현재 존재하는 모든 팀 폴더를 자동으로 감지
+        import os
+        dags_folder = '/'.join(path_parts[:dags_index + 1])
+        
+        try:
+            # dags 폴더의 모든 하위 폴더를 순회
+            for item in os.listdir(dags_folder):
+                item_path = os.path.join(dags_folder, item)
+                # 폴더이고, shared가 아니며, 숨김 폴더가 아닌 경우
+                if os.path.isdir(item_path) and item != 'shared' and not item.startswith('.'):
+                    role_name = f"{item}-user"
+                    dag.access_control[role_name] = {'can_read'}
+            
+            print(f"Applied shared read access for DAG {dag.dag_id}")
+        except Exception as e:
+            print(f"Warning: Could not apply shared access for {dag.dag_id}: {e}")
+    
+    # 일반 팀 폴더인 경우: 해당 팀에게 전체 권한
+    else:
+        role_name = f"{team_folder}-user"
+        dag.access_control[role_name] = {
+            'can_read',
+            'can_edit',
+            'can_delete'
+        }
+        
+        print(f"Applied full access for DAG {dag.dag_id}: {role_name}")
